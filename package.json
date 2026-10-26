@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "npm -w apps/web run dev",
-    "build": "npm -w sdk run build && npm -w apps/web run build",
+    "build": "npm -w apps/web run build",
     "test": "npm -w sdk run test && npm -w apps/web run test",
     "lint": "npm -w sdk run lint && npm -w apps/web run lint"
   },
