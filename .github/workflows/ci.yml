@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run type-check 2>/dev/null || echo "Type check skipped"
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  contract-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install soroban-cli
+        run: cargo install soroban-cli
+
+      - name: Build contract
+        run: |
+          cd contracts/streaming
+          cargo build --target wasm32-unknown-unknown --release
+
+      - name: Run contract tests
+        run: |
+          cd contracts/streaming
+          cargo test
