@@ -1,41 +1,26 @@
-/**
- * Streamora SDK - Streaming payments on Stellar
- */
-
-export { StreamoraClient } from "./client";
+export { StreamoraClient } from "./client.js";
+export { NETWORKS } from "./types.js";
 export type {
-  Stream,
-  Recipient,
-  StreamCreationParams,
-  WithdrawalParams,
-  StreamInfo,
-  TransactionResult,
+  NetworkName,
+  NetworkConfig,
   ClientConfig,
-} from "./types";
-export { Network } from "./types";
+  Recipient,
+  RecipientInput,
+  Stream,
+  CreateStreamParams,
+  PreparedTransaction,
+  TxResult,
+  TxStatus,
+} from "./types.js";
+export { StreamoraError, CONTRACT_ERRORS, parseError } from "./errors.js";
+export { parseUnits, formatUnits } from "./units.js";
 export {
   calculateVestedAmount,
   calculateWithdrawable,
-  toSmallestUnit,
-  fromSmallestUnit,
+  recipientEntitlement,
   isValidAddress,
+  isValidContractId,
+  validateCreateParams,
   formatDate,
   formatDuration,
-} from "./utils";
-export {
-  TransactionHistory,
-  TransactionType,
-  formatTransactionType,
-  getTransactionStatusColor,
-} from "./transactions";
-export type { TransactionRecord } from "./transactions";
-export {
-  linearVesting,
-  quadraticVesting,
-  cubicVesting,
-  exponentialVesting,
-  cliffVesting,
-  calculateVestedAmount as calculateVestedWithCurve,
-  getCurveDescription,
-  VestingCurve,
-} from "./vesting";
+} from "./utils.js";

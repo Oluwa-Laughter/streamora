@@ -1,60 +1,74 @@
-/**
- * Core types for Streamora streaming payments
- */
+export type NetworkName = "testnet" | "public" | "standalone";
 
-export interface Recipient {
+export interface NetworkConfig {
+  rpcUrl: string;
+  passphrase: string;
+}
+
+export const NETWORKS: Record<NetworkName, NetworkConfig> = {
+  testnet: {
+    rpcUrl: "https://soroban-testnet.stellar.org",
+    passphrase: "Test SDF Network ; September 2015",
+  },
+  public: {
+    rpcUrl: "https://mainnet.sorobanrpc.com",
+    passphrase: "Public Global Stellar Network ; September 2015",
+  },
+  standalone: {
+    rpcUrl: "http://localhost:8000/soroban/rpc",
+    passphrase: "Standalone Network ; February 2017",
+  },
+};
+
+export interface ClientConfig {
+  network: NetworkName;
+  contractId: string;
+  rpcUrl?: string;
+}
+
+export interface RecipientInput {
   address: string;
-  shares: number; // Percentage 1-100
+  /** Whole-number percentage, 1..100. All shares must sum to 100. */
+  shares: number;
+}
+
+export interface Recipient extends RecipientInput {
+  withdrawn: bigint;
 }
 
 export interface Stream {
-  id: string;
+  id: bigint;
   payer: string;
   recipients: Recipient[];
   token: string;
   amount: bigint;
+  /** Unix seconds */
   startTime: number;
   endTime: number;
-  withdrawn: bigint;
-  isCancelled: boolean;
+  cancelledAt: number | null;
 }
 
-export interface StreamCreationParams {
-  recipients: Recipient[];
-  tokenAddress: string;
+export interface CreateStreamParams {
+  payer: string;
+  recipients: RecipientInput[];
+  token: string;
+  /** In the token's smallest unit */
   amount: bigint;
   startTime: number;
   endTime: number;
 }
 
-export interface WithdrawalParams {
-  streamId: string;
-  amount: bigint;
+/** An unsigned, simulated transaction. Sign `xdr` with a wallet, then pass the result to `submit`. */
+export interface PreparedTransaction {
+  xdr: string;
+  networkPassphrase: string;
 }
 
-export interface StreamInfo {
-  stream: Stream;
-  vestedAmount: bigint;
-  withdrawableAmount: bigint;
-  currentTime: number;
-}
+export type TxStatus = "SUCCESS" | "FAILED";
 
-export interface TransactionResult {
+export interface TxResult {
   hash: string;
-  success: boolean;
+  status: TxStatus;
+  returnValue?: unknown;
   error?: string;
-  confirmations?: number;
-}
-
-export enum Network {
-  TESTNET = "testnet",
-  PUBLIC = "public",
-  STANDALONE = "standalone",
-}
-
-export interface ClientConfig {
-  network: Network;
-  rpcUrl?: string;
-  contractId: string;
-  signerPublicKey: string;
 }

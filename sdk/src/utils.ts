@@ -1,108 +1,75 @@
-/**
- * Utility functions for stream calculations and conversions
- */
-
-/**
- * Calculate vested amount at a given timestamp
- * @param amount Total stream amount
- * @param startTime Stream start timestamp
- * @param endTime Stream end timestamp
- * @param currentTime Current timestamp for calculation
- * @returns Vested amount
- */
+/** floor(amount * (t - start) / (end - start)), clamped to [0, amount]. Mirrors the contract. */
 export function calculateVestedAmount(
   amount: bigint,
   startTime: number,
   endTime: number,
   currentTime: number
 ): bigint {
-  if (currentTime <= startTime) {
-    return 0n;
-  }
-
-  if (currentTime >= endTime) {
-    return amount;
-  }
-
-  const elapsed = BigInt(currentTime - startTime);
-  const duration = BigInt(endTime - startTime);
-
-  return (amount * elapsed) / duration;
+  if (currentTime <= startTime) return 0n;
+  if (currentTime >= endTime) return amount;
+  return (amount * BigInt(currentTime - startTime)) / BigInt(endTime - startTime);
 }
 
-/**
- * Calculate withdrawable amount (vested - already withdrawn)
- * @param vestedAmount Amount that has vested
- * @param withdrawnAmount Amount already withdrawn
- * @returns Withdrawable amount
- */
-export function calculateWithdrawable(
-  vestedAmount: bigint,
-  withdrawnAmount: bigint
-): bigint {
-  const available = vestedAmount - withdrawnAmount;
-  return available > 0n ? available : 0n;
+export function calculateWithdrawable(entitled: bigint, withdrawn: bigint): bigint {
+  const a = entitled - withdrawn;
+  return a > 0n ? a : 0n;
 }
 
-/**
- * Convert token amount from decimal representation to stroops/smallest unit
- * @param amount Amount in token
- * @param decimals Token decimal places
- * @returns Amount in smallest unit
- */
-export function toSmallestUnit(amount: number | bigint, decimals: number): bigint {
-  const factor = BigInt(10 ** decimals);
-  const bigAmount = typeof amount === "bigint" ? amount : BigInt(Math.floor(amount));
-  return bigAmount * factor;
+/** A recipient's entitlement: floor(vested * shares / 100). */
+export function recipientEntitlement(vested: bigint, shares: number): bigint {
+  return (vested * BigInt(shares)) / 100n;
 }
 
-/**
- * Convert amount from smallest unit to token representation
- * @param amount Amount in smallest unit
- * @param decimals Token decimal places
- * @returns Amount in token
- */
-export function fromSmallestUnit(amount: bigint, decimals: number): number {
-  const factor = BigInt(10 ** decimals);
-  return Number(amount / factor) + Number(amount % factor) / Number(factor);
-}
-
-/**
- * Validate an address format
- * @param address Address to validate
- * @returns True if valid Stellar address
- */
 export function isValidAddress(address: string): boolean {
   return /^G[A-Z2-7]{55}$/.test(address);
 }
 
-/**
- * Format timestamp to readable date string
- * @param timestamp Unix timestamp
- * @returns Formatted date string
- */
+export function isValidContractId(id: string): boolean {
+  return /^C[A-Z2-7]{55}$/.test(id);
+}
+
 export function formatDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleDateString("en-US", {
+  return new Date(timestamp * 1000).toLocaleString("en-US", {
     year: "numeric",
-    month: "long",
+    month: "short",
     day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
-/**
- * Format duration to human-readable string
- * @param seconds Duration in seconds
- * @returns Formatted duration
- */
 export function formatDuration(seconds: number): string {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const parts: string[] = [];
+  if (d) parts.push(`${d} day${d > 1 ? "s" : ""}`);
+  if (h) parts.push(`${h} hour${h > 1 ? "s" : ""}`);
+  if (m) parts.push(`${m} minute${m > 1 ? "s" : ""}`);
+  return parts.join(" ") || "0 minutes";
+}
 
-  const parts = [];
-  if (days > 0) parts.push(`${days} day${days > 1 ? "s" : ""}`);
-  if (hours > 0) parts.push(`${hours} hour${hours > 1 ? "s" : ""}`);
-  if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? "s" : ""}`);
-
-  return parts.join(" ");
+export function validateCreateParams(p: {
+  recipients: { address: string; shares: number }[];
+  token: string;
+  amount: bigint;
+  startTime: number;
+  endTime: number;
+}, now = Math.floor(Date.now() / 1000)): string | null {
+  if (p.recipients.length < 1 || p.recipients.length > 10) return "Add between 1 and 10 recipients";
+  let total = 0;
+  const seen = new Set<string>();
+  for (const r of p.recipients) {
+    if (!isValidAddress(r.address)) return `Invalid recipient address: ${r.address || "(empty)"}`;
+    if (seen.has(r.address)) return "Duplicate recipient address";
+    seen.add(r.address);
+    if (!Number.isInteger(r.shares) || r.shares < 1 || r.shares > 100) return "Each share must be a whole number from 1 to 100";
+    total += r.shares;
+  }
+  if (total !== 100) return `Shares must sum to 100 (currently ${total})`;
+  if (!isValidContractId(p.token)) return "Invalid token contract address";
+  if (p.amount <= 0n) return "Amount must be greater than zero";
+  if (p.startTime >= p.endTime) return "Start time must be before end time";
+  if (p.endTime <= now) return "End time must be in the future";
+  return null;
 }

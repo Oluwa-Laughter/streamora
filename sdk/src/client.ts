@@ -1,190 +1,180 @@
-/**
- * Streamora SDK Client
- * Provides interface for interacting with streaming payment contracts
- */
-
-import { ClientConfig, Stream, StreamInfo, StreamCreationParams, WithdrawalParams, Network } from "./types";
+import {
+  Account,
+  Contract,
+  StrKey,
+  TransactionBuilder,
+  BASE_FEE,
+  nativeToScVal,
+  scValToNative,
+  rpc,
+  xdr,
+} from "@stellar/stellar-sdk";
+import {
+  ClientConfig,
+  CreateStreamParams,
+  NETWORKS,
+  PreparedTransaction,
+  Stream,
+  TxResult,
+} from "./types.js";
+import { parseError, StreamoraError } from "./errors.js";
 import {
   calculateVestedAmount,
   calculateWithdrawable,
-  isValidAddress,
-  toSmallestUnit,
-  fromSmallestUnit,
-} from "./utils";
+  isValidContractId,
+  recipientEntitlement,
+  validateCreateParams,
+} from "./utils.js";
 
+// Valid placeholder source for read-only simulations; nothing is signed or sent.
+const READ_SOURCE = StrKey.encodeEd25519PublicKey(Buffer.alloc(32));
+
+const addr = (a: string) => nativeToScVal(a, { type: "address" });
+const u64 = (n: bigint | number) => nativeToScVal(BigInt(n), { type: "u64" });
+const i128 = (n: bigint) => nativeToScVal(n, { type: "i128" });
+
+/**
+ * Prepares, simulates and submits Streamora contract calls.
+ * The client never holds keys: `prepare*` returns an unsigned XDR for a wallet to sign,
+ * and `submit` sends the signed XDR.
+ */
 export class StreamoraClient {
-  private config: ClientConfig;
+  readonly server: rpc.Server;
+  readonly networkPassphrase: string;
+  readonly contractId: string;
+  private readonly contract: Contract;
 
   constructor(config: ClientConfig) {
-    if (!isValidAddress(config.signerPublicKey)) {
-      throw new Error("Invalid signer public key");
+    if (!isValidContractId(config.contractId)) throw new StreamoraError("Invalid contract id");
+    const net = NETWORKS[config.network];
+    this.networkPassphrase = net.passphrase;
+    this.contractId = config.contractId;
+    const url = config.rpcUrl ?? net.rpcUrl;
+    this.server = new rpc.Server(url, { allowHttp: url.startsWith("http://") });
+    this.contract = new Contract(config.contractId);
+  }
+
+  private async simulateRead(method: string, ...args: xdr.ScVal[]): Promise<unknown> {
+    try {
+      const tx = new TransactionBuilder(new Account(READ_SOURCE, "0"), {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(this.contract.call(method, ...args))
+        .setTimeout(30)
+        .build();
+      const sim = await this.server.simulateTransaction(tx);
+      if (rpc.Api.isSimulationError(sim)) throw new Error(sim.error);
+      const retval = (sim as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+      return retval === undefined ? undefined : scValToNative(retval);
+    } catch (e) {
+      throw parseError(e);
     }
-
-    this.config = config;
   }
 
-  /**
-   * Get the current network configuration
-   */
-  getNetwork(): Network {
-    return this.config.network;
+  private async prepare(source: string, method: string, ...args: xdr.ScVal[]): Promise<PreparedTransaction> {
+    try {
+      const account = await this.server.getAccount(source);
+      const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: this.networkPassphrase })
+        .addOperation(this.contract.call(method, ...args))
+        .setTimeout(120)
+        .build();
+      // Simulates, then attaches resource fees and auth entries.
+      const prepared = await this.server.prepareTransaction(tx);
+      return { xdr: prepared.toXDR(), networkPassphrase: this.networkPassphrase };
+    } catch (e) {
+      throw parseError(e);
+    }
   }
 
-  /**
-   * Get the contract ID being used
-   */
-  getContractId(): string {
-    return this.config.contractId;
-  }
-
-  /**
-   * Calculate vested amount for a stream at current time
-   */
-  async getVestedAmount(stream: Stream): Promise<bigint> {
-    const currentTime = Math.floor(Date.now() / 1000);
-    return calculateVestedAmount(stream.amount, stream.startTime, stream.endTime, currentTime);
-  }
-
-  /**
-   * Calculate withdrawable amount (vested - already withdrawn)
-   */
-  async getWithdrawableAmount(stream: Stream): Promise<bigint> {
-    const vestedAmount = await this.getVestedAmount(stream);
-    return calculateWithdrawable(vestedAmount, stream.withdrawn);
-  }
-
-  /**
-   * Get full stream information with calculated amounts
-   */
-  async getStreamInfo(stream: Stream): Promise<StreamInfo> {
-    const currentTime = Math.floor(Date.now() / 1000);
-    const vestedAmount = calculateVestedAmount(stream.amount, stream.startTime, stream.endTime, currentTime);
-    const withdrawableAmount = calculateWithdrawable(vestedAmount, stream.withdrawn);
-
+  async getStream(id: bigint | number): Promise<Stream> {
+    const raw = (await this.simulateRead("get_stream", u64(id))) as any;
     return {
-      stream,
-      vestedAmount,
-      withdrawableAmount,
-      currentTime,
+      id: BigInt(id),
+      payer: raw.payer,
+      token: raw.token,
+      amount: BigInt(raw.amount),
+      startTime: Number(raw.start_time),
+      endTime: Number(raw.end_time),
+      cancelledAt: raw.cancelled_at == null ? null : Number(raw.cancelled_at),
+      recipients: raw.recipients.map((r: any) => ({
+        address: r.address,
+        shares: Number(r.shares),
+        withdrawn: BigInt(r.withdrawn),
+      })),
     };
   }
 
-  /**
-   * Prepare stream creation transaction
-   * Note: Returns unsigned transaction data; caller must sign and submit
-   */
-  async prepareCreateStream(params: StreamCreationParams): Promise<{
-    recipients: Array<{ address: string; shares: number }>;
-    tokenAddress: string;
-    amount: bigint;
-    startTime: number;
-    endTime: number;
-  }> {
-    // Validate recipients
-    if (!params.recipients || params.recipients.length === 0) {
-      throw new Error("At least one recipient required");
-    }
-
-    let totalShares = 0;
-    for (const recipient of params.recipients) {
-      if (!isValidAddress(recipient.address)) {
-        throw new Error(`Invalid recipient address: ${recipient.address}`);
-      }
-      if (recipient.shares <= 0 || recipient.shares > 100) {
-        throw new Error("Each recipient share must be 1-100");
-      }
-      totalShares += recipient.shares;
-    }
-
-    if (totalShares !== 100) {
-      throw new Error(`Recipient shares must sum to 100 (got ${totalShares})`);
-    }
-
-    if (!isValidAddress(params.tokenAddress)) {
-      throw new Error("Invalid token address");
-    }
-
-    if (params.amount <= 0n) {
-      throw new Error("Amount must be positive");
-    }
-
-    if (params.startTime >= params.endTime) {
-      throw new Error("Start time must be before end time");
-    }
-
-    const currentTime = Math.floor(Date.now() / 1000);
-    if (params.startTime < currentTime) {
-      throw new Error("Start time cannot be in the past");
-    }
-
-    return {
-      recipients: params.recipients,
-      tokenAddress: params.tokenAddress,
-      amount: params.amount,
-      startTime: params.startTime,
-      endTime: params.endTime,
-    };
+  /** On-chain withdrawable amount for `who` at the current ledger time. */
+  async getWithdrawable(id: bigint | number, who: string): Promise<bigint> {
+    return BigInt((await this.simulateRead("get_withdrawable", u64(id), addr(who))) as bigint);
   }
 
-  /**
-   * Prepare withdrawal transaction
-   */
-  async prepareWithdraw(stream: Stream, params: WithdrawalParams): Promise<{
-    streamId: string;
-    amount: bigint;
-  }> {
-    if (params.amount <= 0n) {
-      throw new Error("Withdrawal amount must be positive");
-    }
-
-    const withdrawable = await this.getWithdrawableAmount(stream);
-    if (params.amount > withdrawable) {
-      throw new Error(`Withdrawal amount exceeds withdrawable balance (${withdrawable})`);
-    }
-
-    return {
-      streamId: params.streamId,
-      amount: params.amount,
-    };
+  /** Local computation that mirrors the contract; useful for live UI ticking. */
+  static withdrawableAt(stream: Stream, who: string, now: number): bigint {
+    const r = stream.recipients.find((x) => x.address === who);
+    if (!r) return 0n;
+    const t = stream.cancelledAt !== null ? Math.min(now, stream.cancelledAt) : now;
+    const vested = calculateVestedAmount(stream.amount, stream.startTime, stream.endTime, t);
+    return calculateWithdrawable(recipientEntitlement(vested, r.shares), r.withdrawn);
   }
 
-  /**
-   * Validate stream addresses and amounts
-   */
-  validateStreamParams(params: StreamCreationParams): { valid: boolean; error?: string } {
-    if (!params.recipients || params.recipients.length === 0) {
-      return { valid: false, error: "At least one recipient required" };
-    }
+  prepareCreateStream(p: CreateStreamParams): Promise<PreparedTransaction> {
+    const err = validateCreateParams(p);
+    if (err) throw new StreamoraError(err);
+    const recipients = xdr.ScVal.scvVec(
+      p.recipients.map((r) =>
+        xdr.ScVal.scvVec([addr(r.address), nativeToScVal(r.shares, { type: "u32" })])
+      )
+    );
+    return this.prepare(
+      p.payer,
+      "create_stream",
+      addr(p.payer),
+      recipients,
+      addr(p.token),
+      i128(p.amount),
+      u64(p.startTime),
+      u64(p.endTime)
+    );
+  }
 
-    let totalShares = 0;
-    for (const recipient of params.recipients) {
-      if (!isValidAddress(recipient.address)) {
-        return { valid: false, error: `Invalid recipient address: ${recipient.address}` };
+  prepareWithdraw(id: bigint | number, who: string, amount: bigint): Promise<PreparedTransaction> {
+    if (amount <= 0n) throw new StreamoraError("Amount must be greater than zero");
+    return this.prepare(who, "withdraw", u64(id), addr(who), i128(amount));
+  }
+
+  prepareCancel(id: bigint | number, payer: string): Promise<PreparedTransaction> {
+    return this.prepare(payer, "cancel_stream", u64(id));
+  }
+
+  /** Submits a wallet-signed XDR and waits for a final result. */
+  async submit(signedXdr: string, timeoutMs = 60_000): Promise<TxResult> {
+    try {
+      const tx = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase);
+      const sent = await this.server.sendTransaction(tx);
+      if (sent.status === "ERROR" || sent.status === "TRY_AGAIN_LATER") {
+        return { hash: sent.hash, status: "FAILED", error: `Network rejected the transaction (${sent.status})` };
       }
-      if (recipient.shares <= 0 || recipient.shares > 100) {
-        return { valid: false, error: "Each recipient share must be 1-100" };
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const res = await this.server.getTransaction(sent.hash);
+        if (res.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+          return {
+            hash: sent.hash,
+            status: "SUCCESS",
+            returnValue: res.returnValue ? scValToNative(res.returnValue) : undefined,
+          };
+        }
+        if (res.status === rpc.Api.GetTransactionStatus.FAILED) {
+          return { hash: sent.hash, status: "FAILED", error: "Transaction failed on-chain" };
+        }
+        await new Promise((r) => setTimeout(r, 1500));
       }
-      totalShares += recipient.shares;
+      throw new StreamoraError(`Timed out waiting for confirmation. Check hash ${sent.hash} on an explorer.`);
+    } catch (e) {
+      throw parseError(e);
     }
-
-    if (totalShares !== 100) {
-      return { valid: false, error: `Recipient shares must sum to 100 (got ${totalShares})` };
-    }
-
-    if (!isValidAddress(params.tokenAddress)) {
-      return { valid: false, error: "Invalid token address" };
-    }
-
-    if (params.amount <= 0n) {
-      return { valid: false, error: "Amount must be positive" };
-    }
-
-    if (params.startTime >= params.endTime) {
-      return { valid: false, error: "Start time must be before end time" };
-    }
-
-    return { valid: true };
   }
 }
 
-export default StreamoraClient;
