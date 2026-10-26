@@ -9,7 +9,7 @@ echo "🚀 Streamora Testnet Deployment"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Check prerequisites
-if ! command -v soroban &> /dev/null; then
+if ! command -v stellar &> /dev/null; then
     echo "❌ soroban-cli not installed"
     echo "Install with: cargo install soroban-cli"
     exit 1
@@ -24,9 +24,9 @@ fi
 # Step 1: Build the contract
 echo ""
 echo "📦 Step 1: Building smart contract..."
-cd contracts/streaming
-cargo build --target wasm32-unknown-unknown --release
-WASM_FILE="target/wasm32-unknown-unknown/release/streamora_streaming.wasm"
+cd contracts
+cargo build --target wasm32v1-none --release -p streamora-streaming
+WASM_FILE="target/wasm32v1-none/release/streamora_streaming.wasm"
 
 if [ ! -f "$WASM_FILE" ]; then
     echo "❌ Contract build failed"
@@ -34,12 +34,12 @@ if [ ! -f "$WASM_FILE" ]; then
 fi
 
 echo "✅ Contract built: $WASM_FILE"
-cd ../..
+cd ..
 
 # Step 2: Setup Soroban network
 echo ""
 echo "🌐 Step 2: Configuring Soroban testnet..."
-soroban config network add \
+stellar config network add \
   --global testnet \
   --rpc-url https://soroban-testnet.stellar.org:443 \
   --network-passphrase "Test SDF Network ; September 2015" || true
@@ -48,10 +48,10 @@ soroban config network add \
 IDENTITY_NAME="streamora-testnet"
 echo ""
 echo "🔐 Step 3: Setting up identity..."
-soroban config identity create "$IDENTITY_NAME" --global || true
+stellar config identity create "$IDENTITY_NAME" --global || true
 
 # Get the public key
-PUBLIC_KEY=$(soroban config identity address "$IDENTITY_NAME")
+PUBLIC_KEY=$(stellar config identity address "$IDENTITY_NAME")
 echo "   Identity: $IDENTITY_NAME"
 echo "   Public Key: $PUBLIC_KEY"
 
@@ -60,8 +60,8 @@ echo ""
 echo "🚀 Step 4: Deploying contract to testnet..."
 echo "   This may take a minute..."
 
-CONTRACT_ID=$(soroban contract deploy \
-  --wasm $WASM_FILE \
+CONTRACT_ID=$(stellar contract deploy \
+  --wasm contracts/$WASM_FILE \
   --source-account "$IDENTITY_NAME" \
   --network testnet)
 

@@ -1,34 +1,32 @@
-# Rust/Cargo
-/target/
-Cargo.lock
-*.rs.bk
-.env
 
-# Node/npm
-node_modules/
-dist/
-build/
-*.tsbuildinfo
-npm-debug.log
-.env.local
-.env.*.local
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
 *~
-.DS_Store
-
-# Soroban
-.soroban/
-soroban.json
-
-# Testing
+build/
+Cargo.lock
+contracts/target/
 coverage/
-.nyc_output/
-
-# OS
+dist/
 .DS_Store
+.env
+.env.*.local
+.env.local
+# IDE
+.idea/
+node_modules/
+# Node/npm
+npm-debug.log
+.nyc_output/
+# OS
+*.rs.bk
+# Rust/Cargo
+.soroban/
+# Soroban
+soroban.json
+*.swo
+*.swp
+/target/
+target/
+# Testing
+test_snapshots/
 Thumbs.db
+*.tsbuildinfo
+.vscode/

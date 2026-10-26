@@ -10,5 +10,13 @@ license = "MIT"
 repository = "https://github.com/Strea-mora/Streamora.git"
 
 [workspace.dependencies]
-soroban-sdk = "21.6"
-soroban-contract = "21.6"
+soroban-sdk = "21.7.7"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+panic = "abort"
+codegen-units = 1
+lto = true

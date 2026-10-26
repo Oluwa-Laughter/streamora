@@ -6,14 +6,11 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[dependencies]
-soroban-sdk = { workspace = true, features = ["contract"] }
-
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
-[profile.release]
-opt-level = "z"
-strip = true
-lto = true
-codegen-units = 1
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

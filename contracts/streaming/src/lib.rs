@@ -1,28 +1,83 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, Address, Env, String, Vec, symbol_short, Symbol,
-    storage::Persistent, token, ConversionError,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Vec,
 };
-use core::cmp::{max, min};
 
-#[derive(Clone)]
-pub struct Recipient {
-    pub address: Address,
-    pub shares: i128, // Percentage (1-100)
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum Error {
+    InvalidAmount = 1,
+    InvalidTimes = 2,
+    InvalidRecipients = 3,
+    StreamNotFound = 4,
+    NotRecipient = 5,
+    NothingToWithdraw = 6,
+    AlreadyCancelled = 7,
+    AmountExceedsWithdrawable = 8,
 }
 
-#[derive(Clone)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Recipient {
+    pub address: Address,
+    /// Percentage of the stream, 1..=100. All shares must sum to 100.
+    pub shares: u32,
+    pub withdrawn: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Stream {
-    pub id: String,
     pub payer: Address,
     pub recipients: Vec<Recipient>,
     pub token: Address,
     pub amount: i128,
     pub start_time: u64,
     pub end_time: u64,
-    pub withdrawn: i128,
-    pub is_cancelled: bool,
+    /// Set when the payer cancels; vesting freezes at this timestamp.
+    pub cancelled_at: Option<u64>,
+}
+
+#[contracttype]
+enum DataKey {
+    Counter,
+    Stream(u64),
+}
+
+/// floor(amount * (t - start) / (end - start)), clamped to [0, amount].
+pub fn vested_at(amount: i128, start: u64, end: u64, t: u64) -> i128 {
+    if t <= start {
+        0
+    } else if t >= end {
+        amount
+    } else {
+        amount * ((t - start) as i128) / ((end - start) as i128)
+    }
+}
+
+fn effective_time(s: &Stream, now: u64) -> u64 {
+    match s.cancelled_at {
+        Some(c) if c < now => c,
+        _ => now,
+    }
+}
+
+fn load(env: &Env, id: u64) -> Result<Stream, Error> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Stream(id))
+        .ok_or(Error::StreamNotFound)
+}
+
+fn save(env: &Env, id: u64, s: &Stream) {
+    env.storage().persistent().set(&DataKey::Stream(id), s);
+}
+
+fn entitlement(s: &Stream, r: &Recipient, now: u64) -> i128 {
+    let v = vested_at(s.amount, s.start_time, s.end_time, effective_time(s, now));
+    v * (r.shares as i128) / 100
 }
 
 #[contract]
@@ -30,221 +85,134 @@ pub struct StreamingContract;
 
 #[contractimpl]
 impl StreamingContract {
-    /// Create a new payment stream with multiple recipients
+    /// Creates a stream, escrows `amount` of `token` from `payer`, returns the stream id.
     pub fn create_stream(
         env: Env,
-        stream_id: String,
         payer: Address,
-        recipients: Vec<Recipient>,
+        recipients: Vec<(Address, u32)>,
         token: Address,
         amount: i128,
         start_time: u64,
         end_time: u64,
-    ) -> Result<(), String> {
-        // Validate inputs
-        if amount <= 0 {
-            return Err(String::from_slice(&env, "Amount must be positive"));
-        }
-
-        if start_time >= end_time {
-            return Err(String::from_slice(&env, "Start time must be before end time"));
-        }
-
-        if end_time <= env.ledger().timestamp() {
-            return Err(String::from_slice(&env, "End time must be in the future"));
-        }
-
-        if recipients.len() == 0 {
-            return Err(String::from_slice(&env, "At least one recipient required"));
-        }
-
-        // Validate recipient shares sum to 100
-        let mut total_shares = 0i128;
-        for recipient in recipients.iter() {
-            if recipient.shares <= 0 || recipient.shares > 100 {
-                return Err(String::from_slice(&env, "Each recipient share must be 1-100"));
-            }
-            total_shares += recipient.shares;
-        }
-
-        if total_shares != 100 {
-            return Err(String::from_slice(&env, "Recipient shares must sum to 100"));
-        }
-
-        // Check authorization
+    ) -> Result<u64, Error> {
         payer.require_auth();
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        if start_time >= end_time || end_time <= env.ledger().timestamp() {
+            return Err(Error::InvalidTimes);
+        }
+        if recipients.is_empty() || recipients.len() > 10 {
+            return Err(Error::InvalidRecipients);
+        }
+        let mut total: u32 = 0;
+        let mut rs: Vec<Recipient> = Vec::new(&env);
+        for (address, shares) in recipients.iter() {
+            if shares == 0 || shares > 100 {
+                return Err(Error::InvalidRecipients);
+            }
+            total += shares;
+            rs.push_back(Recipient { address, shares, withdrawn: 0 });
+        }
+        if total != 100 {
+            return Err(Error::InvalidRecipients);
+        }
 
-        // Initialize stream
+        token::Client::new(&env, &token).transfer(&payer, &env.current_contract_address(), &amount);
+
+        let id: u64 = env.storage().instance().get(&DataKey::Counter).unwrap_or(0) + 1;
+        env.storage().instance().set(&DataKey::Counter, &id);
         let stream = Stream {
-            id: stream_id.clone(),
             payer: payer.clone(),
-            recipients: recipients.clone(),
-            token: token.clone(),
+            recipients: rs,
+            token,
             amount,
             start_time,
             end_time,
-            withdrawn: 0,
-            is_cancelled: false,
+            cancelled_at: None,
         };
-
-        // Store stream
-        env.storage().persistent().set(&stream_id, &stream);
-
-        // Transfer tokens from payer to contract
-        let token_client = token::Client::new(&env, &token);
-        token_client.transfer(
-            &payer,
-            &env.current_contract_address(),
-            &amount,
-        );
-
-        Ok(())
+        save(&env, id, &stream);
+        env.events().publish((symbol_short!("created"), id), (payer, amount));
+        Ok(id)
     }
 
-    /// Get stream information
-    pub fn get_stream(env: Env, stream_id: String) -> Result<Stream, String> {
-        let stream: Option<Stream> = env
-            .storage()
-            .persistent()
-            .get(&stream_id)
-            .unwrap_or(None);
-
-        match stream {
-            Some(s) => Ok(s),
-            None => Err(String::from_slice(&env, "Stream not found")),
-        }
+    pub fn get_stream(env: Env, id: u64) -> Result<Stream, Error> {
+        load(&env, id)
     }
 
-    /// Calculate vested amount at a specific time
-    pub fn get_vested_amount(
-        env: Env,
-        stream_id: String,
-        at_time: u64,
-    ) -> Result<i128, String> {
-        let stream = Self::get_stream(env.clone(), stream_id)?;
-
-        if stream.is_cancelled {
-            return Ok(0);
-        }
-
-        if at_time <= stream.start_time {
-            return Ok(0);
-        }
-
-        if at_time >= stream.end_time {
-            return Ok(stream.amount);
-        }
-
-        let vested = stream.amount * (at_time - stream.start_time) as i128
-            / (stream.end_time - stream.start_time) as i128;
-
-        Ok(vested)
+    /// Total vested for the whole stream at `at_time` (ignores cancellation).
+    pub fn get_vested_amount(env: Env, id: u64, at_time: u64) -> Result<i128, Error> {
+        let s = load(&env, id)?;
+        Ok(vested_at(s.amount, s.start_time, s.end_time, at_time))
     }
 
-    /// Get withdrawable amount (vested - already withdrawn)
-    pub fn get_withdrawable_amount(
-        env: Env,
-        stream_id: String,
-    ) -> Result<i128, String> {
-        let stream = Self::get_stream(env.clone(), stream_id)?;
-        let current_time = env.ledger().timestamp();
-        let vested = Self::get_vested_amount(env, stream_id, current_time)?;
-        Ok(max(0, vested - stream.withdrawn))
-    }
-
-    /// Withdraw available funds (for one of the recipients)
-    pub fn withdraw(
-        env: Env,
-        stream_id: String,
-        recipient_address: Address,
-        amount: i128,
-    ) -> Result<(), String> {
-        let mut stream = Self::get_stream(env.clone(), stream_id.clone())?;
-
-        // Check authorization
-        recipient_address.require_auth();
-
-        if stream.is_cancelled {
-            return Err(String::from_slice(&env, "Stream is cancelled"));
-        }
-
-        if amount <= 0 {
-            return Err(String::from_slice(&env, "Withdrawal amount must be positive"));
-        }
-
-        // Find recipient and their share
-        let mut recipient_share: Option<i128> = None;
-        for recipient in stream.recipients.iter() {
-            if recipient.address == recipient_address {
-                recipient_share = Some(recipient.shares);
-                break;
+    /// Amount `who` can withdraw right now.
+    pub fn get_withdrawable(env: Env, id: u64, who: Address) -> Result<i128, Error> {
+        let s = load(&env, id)?;
+        for r in s.recipients.iter() {
+            if r.address == who {
+                let e = entitlement(&s, &r, env.ledger().timestamp());
+                return Ok((e - r.withdrawn).max(0));
             }
         }
+        Err(Error::NotRecipient)
+    }
 
-        if recipient_share.is_none() {
-            return Err(String::from_slice(&env, "Not a recipient of this stream"));
+    pub fn withdraw(env: Env, id: u64, who: Address, amount: i128) -> Result<(), Error> {
+        who.require_auth();
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
         }
-
-        let current_time = env.ledger().timestamp();
-        let vested = Self::get_vested_amount(env.clone(), stream_id.clone(), current_time)?;
-
-        // Calculate recipient's portion
-        let recipient_vested = vested * recipient_share.unwrap() / 100i128;
-        let recipient_withdrawable = max(0, recipient_vested - stream.withdrawn);
-
-        if amount > recipient_withdrawable {
-            return Err(String::from_slice(&env, "Insufficient vested balance"));
+        let mut s = load(&env, id)?;
+        let now = env.ledger().timestamp();
+        let mut idx: Option<u32> = None;
+        for (i, r) in s.recipients.iter().enumerate() {
+            if r.address == who {
+                idx = Some(i as u32);
+            }
         }
-
-        // Update stream
-        stream.withdrawn += amount;
-        env.storage().persistent().set(&stream_id, &stream);
-
-        // Transfer tokens to recipient
-        let token_client = token::Client::new(&env, &stream.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &recipient_address,
-            &amount,
-        );
-
+        let i = idx.ok_or(Error::NotRecipient)?;
+        let mut r = s.recipients.get(i).unwrap();
+        let available = (entitlement(&s, &r, now) - r.withdrawn).max(0);
+        if available == 0 {
+            return Err(Error::NothingToWithdraw);
+        }
+        if amount > available {
+            return Err(Error::AmountExceedsWithdrawable);
+        }
+        r.withdrawn += amount;
+        s.recipients.set(i, r);
+        save(&env, id, &s);
+        token::Client::new(&env, &s.token).transfer(&env.current_contract_address(), &who, &amount);
+        env.events().publish((symbol_short!("withdrew"), id), (who, amount));
         Ok(())
     }
 
-    /// Cancel a stream (payer only)
-    pub fn cancel_stream(
-        env: Env,
-        stream_id: String,
-    ) -> Result<(), String> {
-        let mut stream = Self::get_stream(env.clone(), stream_id.clone())?;
-
-        // Only payer can cancel
-        stream.payer.require_auth();
-
-        if stream.is_cancelled {
-            return Err(String::from_slice(&env, "Stream is already cancelled"));
+    /// Payer-only, any time. Vesting freezes now; the unvested remainder is
+    /// refunded to the payer. Recipients keep their vested share and may still withdraw it.
+    pub fn cancel_stream(env: Env, id: u64) -> Result<i128, Error> {
+        let mut s = load(&env, id)?;
+        s.payer.require_auth();
+        if s.cancelled_at.is_some() {
+            return Err(Error::AlreadyCancelled);
         }
-
-        let current_time = env.ledger().timestamp();
-        let vested = Self::get_vested_amount(env.clone(), stream_id.clone(), current_time)?;
-        let unvested = stream.amount - vested;
-
-        // Mark as cancelled
-        stream.is_cancelled = true;
-        env.storage().persistent().set(&stream_id, &stream);
-
-        // Return unvested funds to payer
-        if unvested > 0 {
-            let token_client = token::Client::new(&env, &stream.token);
-            token_client.transfer(
+        let now = env.ledger().timestamp();
+        let vested = vested_at(s.amount, s.start_time, s.end_time, now);
+        // Rounding dust from per-recipient floor division stays escrowed with the recipients' side.
+        let refund = s.amount - vested;
+        s.cancelled_at = Some(now);
+        save(&env, id, &s);
+        if refund > 0 {
+            token::Client::new(&env, &s.token).transfer(
                 &env.current_contract_address(),
-                &stream.payer,
-                &unvested,
+                &s.payer,
+                &refund,
             );
         }
-
-        Ok(())
+        env.events().publish((symbol_short!("cancelled"), id), refund);
+        Ok(refund)
     }
 }
 
+#[cfg(test)]
 mod test;
