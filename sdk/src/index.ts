@@ -22,3 +22,10 @@ export {
   formatDate,
   formatDuration,
 } from "./utils";
+export {
+  TransactionHistory,
+  TransactionType,
+  formatTransactionType,
+  getTransactionStatusColor,
+} from "./transactions";
+export type { TransactionRecord } from "./transactions";
