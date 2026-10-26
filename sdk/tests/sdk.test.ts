@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   calculateVestedAmount,
   calculateWithdrawable,
@@ -91,5 +91,21 @@ describe("StreamoraClient", () => {
   it("blocks invalid create before any network call", () => {
     const c = new StreamoraClient({ network: "testnet", contractId: TOKEN });
     expect(() => c.prepareCreateStream({ payer: A, recipients: [], token: TOKEN, amount: 1n, startTime: 1, endTime: 2 })).toThrow();
+  });
+});
+
+describe("read path", () => {
+  it("READ_SOURCE is a valid ed25519 public key (a bad one broke every read in the browser)", async () => {
+    const { READ_SOURCE } = await import("../src/client");
+    const { StrKey } = await import("@stellar/stellar-sdk");
+    expect(StrKey.isValidEd25519PublicKey(READ_SOURCE)).toBe(true);
+  });
+
+  it("builds and simulates a read without throwing before the network call", async () => {
+    const c = new StreamoraClient({ network: "testnet", contractId: TOKEN });
+    const sim = vi.fn().mockResolvedValue({ error: "HostError: Error(Contract, #4)" });
+    (c.server as unknown as { simulateTransaction: unknown }).simulateTransaction = sim;
+    await expect(c.getStream(1n)).rejects.toThrow(/Stream not found/);
+    expect(sim).toHaveBeenCalledOnce();
   });
 });

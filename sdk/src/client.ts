@@ -26,7 +26,7 @@ import {
 } from "./utils.js";
 
 // Valid placeholder source for read-only simulations; nothing is signed or sent.
-const READ_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+export const READ_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 const addr = (a: string) => nativeToScVal(a, { type: "address" });
 const u64 = (n: bigint | number) => nativeToScVal(BigInt(n), { type: "u64" });
