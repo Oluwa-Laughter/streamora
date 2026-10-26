@@ -29,3 +29,13 @@ export {
   getTransactionStatusColor,
 } from "./transactions";
 export type { TransactionRecord } from "./transactions";
+export {
+  linearVesting,
+  quadraticVesting,
+  cubicVesting,
+  exponentialVesting,
+  cliffVesting,
+  calculateVestedAmount as calculateVestedWithCurve,
+  getCurveDescription,
+  VestingCurve,
+} from "./vesting";
