@@ -13,8 +13,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest",
-    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "lint": "eslint src",
     "format": "prettier --write src/**/*.ts"
   },
   "devDependencies": {

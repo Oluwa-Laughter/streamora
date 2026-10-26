@@ -1,460 +1,54 @@
-# SDK Documentation
+# SDK (`@streamora/sdk`)
 
-## Overview
+TypeScript client for the Streamora contract. It never holds keys: it builds and simulates a transaction, a wallet signs it, and you submit the signed XDR.
 
-The Streamora SDK is a TypeScript library for interacting with Soroban streaming payment contracts. It handles validation, calculations, and transaction preparation while leaving signing and submission to the caller.
+All token amounts are `bigint` in the token's smallest unit. Use `parseUnits` / `formatUnits` to convert from/to decimal strings (no floating point).
 
-## Installation
-
-```bash
-npm install streamora-sdk
-```
-
-Or from source:
-
-```bash
-npm install ./sdk
-```
-
-## Quick Start
-
-```typescript
-import { StreamoraClient, Network } from "streamora-sdk";
+```ts
+import { StreamoraClient, parseUnits } from "@streamora/sdk";
 
 const client = new StreamoraClient({
-  network: Network.TESTNET,
-  contractId: "CBQHNAXSI55GXVBA3WQ2IMP4XGLNWWPSTLRWNQGWS7UJJHGNAJW223HI",
-  signerPublicKey: "GBBD47UZ...",
+  network: "testnet",
+  contractId: "CABJ22MJTXMZHACHV25MFD6ECVRQ3NRUJ2HYB2B4LVP3PQ6R2N72RN3K",
 });
 
-// Calculate vested amount
-const vestedAmount = await client.getVestedAmount(stream);
-console.log(vestedAmount.toString());
-```
-
-## API Reference
-
-### StreamoraClient
-
-Main client class for contract interaction.
-
-#### Constructor
-
-```typescript
-constructor(config: ClientConfig)
-```
-
-**Parameters:**
-- `config.network`: Network enum (TESTNET, PUBLIC, STANDALONE)
-- `config.contractId`: Smart contract address
-- `config.signerPublicKey`: Caller's public key
-- `config.rpcUrl?`: Optional custom RPC endpoint
-
-**Throws:**
-- Error if `signerPublicKey` is invalid
-
-#### getNetwork()
-
-```typescript
-getNetwork(): Network
-```
-
-Returns the configured network.
-
-#### getContractId()
-
-```typescript
-getContractId(): string
-```
-
-Returns the contract ID being used.
-
-#### getVestedAmount()
-
-```typescript
-async getVestedAmount(stream: Stream): Promise<bigint>
-```
-
-Calculates the vested amount of a stream at the current time.
-
-**Parameters:**
-- `stream`: Stream object with amount, startTime, endTime
-
-**Returns:**
-- Vested amount as bigint
-
-**Example:**
-```typescript
-const stream = await getStreamFromContract("stream-123");
-const vested = await client.getVestedAmount(stream);
-console.log(`Vested: ${vested.toString()} stroops`);
-```
-
-#### getWithdrawableAmount()
-
-```typescript
-async getWithdrawableAmount(stream: Stream): Promise<bigint>
-```
-
-Calculates the amount currently withdrawable (vested minus already withdrawn).
-
-**Parameters:**
-- `stream`: Stream object
-
-**Returns:**
-- Withdrawable amount as bigint
-
-#### getStreamInfo()
-
-```typescript
-async getStreamInfo(stream: Stream): Promise<StreamInfo>
-```
-
-Gets complete stream information including all calculated amounts.
-
-**Returns:**
-```typescript
-interface StreamInfo {
-  stream: Stream;
-  vestedAmount: bigint;
-  withdrawableAmount: bigint;
-  currentTime: number;
-}
-```
-
-#### prepareCreateStream()
-
-```typescript
-async prepareCreateStream(params: StreamCreationParams): Promise<PreparedTxn>
-```
-
-Prepares stream creation transaction for signing.
-
-**Parameters:**
-```typescript
-interface StreamCreationParams {
-  recipientAddress: string;
-  tokenAddress: string;
-  amount: bigint;
-  startTime: number;
-  endTime: number;
-}
-```
-
-**Returns:**
-```typescript
-{
-  recipientAddress: string;
-  tokenAddress: string;
-  amount: bigint;
-  startTime: number;
-  endTime: number;
-}
-```
-
-**Throws:**
-- Error if parameters are invalid
-- Error if start time is in past
-- Error if recipient or token address is invalid
-
-**Example:**
-```typescript
-const txnData = await client.prepareCreateStream({
-  recipientAddress: "GCPD7RQ36...",
-  tokenAddress: "CAAAAAAA...",
-  amount: 1000000000n,
-  startTime: Math.floor(Date.now() / 1000) + 3600,
-  endTime: Math.floor(Date.now() / 1000) + 2592000,
+// 1. Prepare (validates, simulates, attaches fees + auth)
+const prepared = await client.prepareCreateStream({
+  payer,                                   // G... address that will sign
+  recipients: [{ address: bob, shares: 100 }],
+  token,                                   // token contract id (C...)
+  amount: parseUnits("10", 7),
+  startTime: now + 60,
+  endTime: now + 86_400,
 });
 
-// Sign and submit txnData
+// 2. Sign with a wallet (Freighter shown)
+const { signedTxXdr } = await signTransaction(prepared.xdr, { networkPassphrase: prepared.networkPassphrase });
+
+// 3. Submit and wait for a final result
+const result = await client.submit(signedTxXdr);
+if (result.status === "SUCCESS") console.log("stream id", result.returnValue);
 ```
 
-#### prepareWithdraw()
+## API
 
-```typescript
-async prepareWithdraw(stream: Stream, params: WithdrawalParams): Promise<PreparedTxn>
-```
+| Method | Description |
+|---|---|
+| `new StreamoraClient({ network, contractId, rpcUrl? })` | `network`: `"testnet" \| "public" \| "standalone"` |
+| `getStream(id)` | Reads a stream via simulation |
+| `getWithdrawable(id, who)` | On-chain withdrawable amount for a recipient |
+| `StreamoraClient.withdrawableAt(stream, who, now)` | Local computation mirroring the contract (for live UI) |
+| `prepareCreateStream(params)` | Returns `{ xdr, networkPassphrase }` |
+| `prepareWithdraw(id, who, amount)` | Returns `{ xdr, networkPassphrase }` |
+| `prepareCancel(id, payer)` | Returns `{ xdr, networkPassphrase }` |
+| `submit(signedXdr)` | Sends and polls until `SUCCESS`/`FAILED` |
 
-Prepares withdrawal transaction.
+Helpers: `parseUnits`, `formatUnits`, `calculateVestedAmount`, `calculateWithdrawable`, `recipientEntitlement`, `validateCreateParams`, `isValidAddress`, `isValidContractId`, `formatDate`, `formatDuration`.
 
-**Parameters:**
-```typescript
-interface WithdrawalParams {
-  streamId: string;
-  amount: bigint;
-}
-```
+## Errors
 
-**Throws:**
-- Error if amount exceeds withdrawable balance
-- Error if amount is zero or negative
+Failures throw `StreamoraError`. Contract errors carry a `code` and a readable message (`CONTRACT_ERRORS`), e.g. `6` "Nothing is available to withdraw yet". RPC outages are reported as "RPC service is unavailable".
 
-#### validateStreamParams()
+## Tests
 
-```typescript
-validateStreamParams(params: StreamCreationParams): { valid: boolean; error?: string }
-```
-
-Validates stream parameters without throwing.
-
-**Returns:**
-```typescript
-{ 
-  valid: true // if all checks pass
-} 
-// or
-{ 
-  valid: false, 
-  error: "Start time must be before end time" 
-}
-```
-
-**Example:**
-```typescript
-const validation = client.validateStreamParams(params);
-if (!validation.valid) {
-  console.error(validation.error);
-}
-```
-
-## Utility Functions
-
-### calculateVestedAmount()
-
-```typescript
-export function calculateVestedAmount(
-  amount: bigint,
-  startTime: number,
-  endTime: number,
-  currentTime: number
-): bigint
-```
-
-Manual vesting calculation (does not require client).
-
-**Example:**
-```typescript
-import { calculateVestedAmount } from "streamora-sdk";
-
-const amount = 1000000000n;
-const start = 1700000000;
-const end = 1702592000;
-const now = Math.floor(Date.now() / 1000);
-
-const vested = calculateVestedAmount(amount, start, end, now);
-```
-
-### calculateWithdrawable()
-
-```typescript
-export function calculateWithdrawable(
-  vestedAmount: bigint,
-  withdrawnAmount: bigint
-): bigint
-```
-
-Calculates withdrawable amount from vested and withdrawn.
-
-### toSmallestUnit()
-
-```typescript
-export function toSmallestUnit(
-  amount: number | bigint,
-  decimals: number
-): bigint
-```
-
-Converts from decimal representation to stroops.
-
-**Example:**
-```typescript
-import { toSmallestUnit } from "streamora-sdk";
-
-// 100 tokens with 7 decimals
-const stroops = toSmallestUnit(100, 7); // 1000000000n
-```
-
-### fromSmallestUnit()
-
-```typescript
-export function fromSmallestUnit(
-  amount: bigint,
-  decimals: number
-): number
-```
-
-Converts from stroops back to decimal representation.
-
-**Example:**
-```typescript
-import { fromSmallestUnit } from "streamora-sdk";
-
-const display = fromSmallestUnit(1000000000n, 7); // 100
-```
-
-### isValidAddress()
-
-```typescript
-export function isValidAddress(address: string): boolean
-```
-
-Validates Stellar address format.
-
-**Example:**
-```typescript
-import { isValidAddress } from "streamora-sdk";
-
-isValidAddress("GBBD47UZ..."); // true
-isValidAddress("invalid"); // false
-```
-
-### formatDate()
-
-```typescript
-export function formatDate(timestamp: number): string
-```
-
-Formats Unix timestamp to readable date.
-
-### formatDuration()
-
-```typescript
-export function formatDuration(seconds: number): string
-```
-
-Formats duration in seconds to human-readable string.
-
-**Example:**
-```typescript
-import { formatDuration } from "streamora-sdk";
-
-formatDuration(2592000); // "30 days"
-```
-
-## Types
-
-### Stream
-
-```typescript
-interface Stream {
-  id: string;
-  payer: string;
-  recipient: string;
-  token: string;
-  amount: bigint;
-  startTime: number;
-  endTime: number;
-  withdrawn: bigint;
-  isCancelled: boolean;
-}
-```
-
-### ClientConfig
-
-```typescript
-interface ClientConfig {
-  network: Network;
-  contractId: string;
-  signerPublicKey: string;
-  rpcUrl?: string;
-}
-```
-
-### Network
-
-```typescript
-enum Network {
-  TESTNET = "testnet",
-  PUBLIC = "public",
-  STANDALONE = "standalone",
-}
-```
-
-## Error Handling
-
-All async methods may throw:
-
-```typescript
-try {
-  const vested = await client.getVestedAmount(stream);
-} catch (error) {
-  console.error("Failed to calculate vested:", error.message);
-}
-```
-
-Common errors:
-- "Invalid signer public key"
-- "Invalid recipient address"
-- "Amount must be positive"
-- "Start time must be before end time"
-- "Withdrawal amount exceeds withdrawable balance"
-
-## Best Practices
-
-1. **Always validate before submitting:**
-   ```typescript
-   const { valid, error } = client.validateStreamParams(params);
-   if (!valid) throw new Error(error);
-   ```
-
-2. **Use bigint for all amounts:**
-   ```typescript
-   const amount = 1000000000n; // Not 1000000000
-   ```
-
-3. **Convert decimals at boundaries:**
-   ```typescript
-   const userInput = 100; // Display amount
-   const stroops = toSmallestUnit(userInput, 7); // For contract
-   ```
-
-4. **Never hardcode contract addresses:**
-   ```typescript
-   const contractId = process.env.VITE_CONTRACT_ID;
-   ```
-
-5. **Cache stream data:**
-   ```typescript
-   // Fetch once, reuse for calculations
-   const stream = await getStream("stream-123");
-   const vested = calculateVestedAmount(stream.amount, ...);
-   const withdrawable = calculateWithdrawable(vested, stream.withdrawn);
-   ```
-
-## Testing
-
-Import for tests:
-
-```typescript
-import { 
-  calculateVestedAmount, 
-  calculateWithdrawable,
-  StreamoraClient 
-} from "streamora-sdk";
-```
-
-Example test:
-
-```typescript
-import { calculateVestedAmount } from "streamora-sdk";
-
-test("vests 50% at midpoint", () => {
-  const vested = calculateVestedAmount(
-    1000n,
-    1000,
-    2000,
-    1500 // midpoint
-  );
-  expect(vested).toBe(500n);
-});
-```
-
-## Changelog
-
-### v0.1.0
-
-- Initial SDK release
-- Core client and utilities
-- Address validation
-- Vesting calculations
+`npm test -w sdk` runs unit tests (math, units, validation, errors). The create → withdraw → cancel flow was also exercised manually against the deployed testnet contract.

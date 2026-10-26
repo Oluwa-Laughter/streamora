@@ -21,6 +21,11 @@ export default function Features() {
       icon: "💻",
     },
     {
+      title: "Cancellation and Multi-Recipient Streams",
+      description: "Payers can cancel and reclaim the unvested part. Up to 10 recipients per stream with percentage shares.",
+      icon: "🔀",
+    },
+    {
       title: "Open Source",
       description: "MIT licensed. Full source code available on GitHub. Community-driven.",
       icon: "🔓",
@@ -33,14 +38,6 @@ export default function Features() {
   ];
 
   const planned = [
-    {
-      title: "Stream Cancellation",
-      description: "Payers can reclaim unvested funds with automatic fund reallocation.",
-    },
-    {
-      title: "Multi-Recipient Streams",
-      description: "Split payments across multiple recipients in a single stream.",
-    },
     {
       title: "Batch Operations",
       description: "Create multiple streams in a single transaction.",
@@ -71,7 +68,7 @@ export default function Features() {
       </section>
 
       <section className="section-container">
-        <h2 className="text-4xl font-bold text-center mb-12">✅ Implemented (MVP)</h2>
+        <h2 className="text-4xl font-bold text-center mb-12">✅ Implemented (testnet, unaudited)</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-20">
           {implemented.map((feature) => (
             <div key={feature.title} className="card hover:shadow-md transition-shadow">

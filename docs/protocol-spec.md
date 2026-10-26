@@ -129,21 +129,17 @@ Tokens are represented in their smallest unit (e.g., stroops for Stellar):
 - Amount exceeds withdrawable balance
 - Token transfer failure
 
-### 5. Cancel Stream (Planned)
+### 5. Cancel Stream
 
-**Function:** `cancel_stream(stream_id)`
+**Function:** `cancel_stream(id) -> i128` (refunded amount)
 
-**Preconditions:** TBD
-- Likely: Caller is payer
-- Stream is not already cancelled
+**Who / when:** only the payer, at any time before it has been cancelled.
 
 **Effects:**
-- Mark stream as cancelled
-- Transfer vested amount to recipient
-- Return unvested funds to payer
-- Emit `Cancelled` event
-
-**Note:** Not implemented in MVP. Will require careful definition of unvested fund handling.
+- Vesting freezes at the cancellation timestamp (`cancelled_at`).
+- The unvested remainder (`amount - vested`) is refunded to the payer immediately.
+- Recipients keep their vested share and can still withdraw it after cancellation.
+- Per-recipient floor-division dust stays escrowed in the contract.
 
 ## Events
 
@@ -207,7 +203,7 @@ The protocol is token-agnostic. Any Stellar-compatible token can be used.
 
 1. **Single Recipient**: Streams have one recipient. Multi-recipient patterns require multiple streams.
 2. **Linear Vesting Only**: No curve-based, milestone-based, or recurring vesting.
-3. **No Cancellation**: Cannot cancel and reclaim unvested funds.
+3. **Cancellation is payer-only** and cannot be undone.
 4. **No Pause/Resume**: Streams run continuously once created.
 5. **Fixed Time Bounds**: Cannot be extended or modified.
 

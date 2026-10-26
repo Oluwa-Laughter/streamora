@@ -1,97 +1,23 @@
-import { useState } from "react";
+import { config } from "../../config";
+import { useWallet } from "../../contexts/WalletContext";
 
 export default function Settings() {
-  const [settings, setSettings] = useState({
-    network: "testnet",
-    theme: "light",
-  });
-
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSettings((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-  };
-
+  const { address, status, wrongNetwork } = useWallet();
+  const rows: [string, string][] = [
+    ["Network", config.network],
+    ["RPC", config.rpcUrl],
+    ["Contract", config.contractId],
+    ["Default token", config.defaultToken],
+    ["Wallet", status === "connected" ? address! : "Not connected"],
+  ];
   return (
-    <div className="section-container py-20">
-      <h1 className="text-5xl font-bold mb-12">Settings</h1>
-
-      <div className="max-w-2xl">
-        <div className="card space-y-8">
-          <div>
-            <h2 className="text-2xl font-bold mb-6">Network</h2>
-            <div>
-              <label className="block text-sm font-medium mb-2">Stellar Network</label>
-              <select
-                name="network"
-                value={settings.network}
-                onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-              >
-                <option value="testnet">Testnet (Recommended for testing)</option>
-                <option value="public" disabled>
-                  Mainnet (Coming soon)
-                </option>
-              </select>
-              <p className="text-sm text-gray-600 mt-2">
-                Currently using testnet. Mainnet deployment coming soon.
-              </p>
-            </div>
-          </div>
-
-          <hr className="border-gray-200" />
-
-          <div>
-            <h2 className="text-2xl font-bold mb-6">Preferences</h2>
-            <div>
-              <label className="block text-sm font-medium mb-2">Theme</label>
-              <select
-                name="theme"
-                value={settings.theme}
-                onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-              >
-                <option value="light">Light Mode</option>
-                <option value="dark" disabled>
-                  Dark Mode (Coming soon)
-                </option>
-              </select>
-            </div>
-          </div>
-
-          <hr className="border-gray-200" />
-
-          <div>
-            <h2 className="text-2xl font-bold mb-6">Contract Information</h2>
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm text-gray-600">Contract Address</p>
-                <p className="font-mono text-sm">CBQHNAXSI55GXVBA3WQ2IMP4XGLNWWPSTLRWNQGWS7UJJHGNAJW223HI</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600">Network</p>
-                <p className="font-mono text-sm">Stellar Testnet</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600">Status</p>
-                <p className="text-green-600 font-medium">Connected</p>
-              </div>
-            </div>
-          </div>
-
-          <hr className="border-gray-200" />
-
-          <div>
-            <h2 className="text-2xl font-bold mb-6">Wallet</h2>
-            <p className="text-gray-600 mb-6">
-              Connect or disconnect your Stellar wallet.
-            </p>
-            <button className="btn-primary py-3 disabled:opacity-50" disabled>
-              Manage Wallet (Coming Soon)
-            </button>
-          </div>
-        </div>
+    <div className="section-container">
+      <h1 className="text-4xl font-bold mb-8">Settings</h1>
+      <div className="card max-w-3xl space-y-4">
+        {rows.map(([k, v]) => <div key={k}><p className="text-sm text-gray-600">{k}</p><p className="font-mono text-sm break-all">{v}</p></div>)}
+        {wrongNetwork && <p role="alert" className="text-red-600">Freighter is on a different network than this app ({config.network}).</p>}
+        <a className="text-teal-600 underline" target="_blank" rel="noopener noreferrer" href={`${config.explorer}/contract/${config.contractId}`}>View contract on explorer</a>
+        <p className="text-sm text-gray-500">Network and contract are set at build time via VITE_* environment variables.</p>
       </div>
     </div>
   );

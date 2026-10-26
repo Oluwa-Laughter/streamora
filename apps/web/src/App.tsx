@@ -24,6 +24,7 @@ import Streams from "./pages/app/Streams";
 import CreateStream from "./pages/app/CreateStream";
 import StreamDetail from "./pages/app/StreamDetail";
 import Activity from "./pages/app/Activity";
+import Withdraw from "./pages/app/Withdraw";
 import Settings from "./pages/app/Settings";
 
 export default function App() {
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="/app/streams" element={<Streams />} />
             <Route path="/app/streams/create" element={<CreateStream />} />
             <Route path="/app/streams/:id" element={<StreamDetail />} />
+            <Route path="/app/streams/:id/withdraw" element={<Withdraw />} />
             <Route path="/app/activity" element={<Activity />} />
             <Route path="/app/settings" element={<Settings />} />
 

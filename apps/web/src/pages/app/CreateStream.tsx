@@ -1,213 +1,109 @@
 import { useState } from "react";
-import { useWallet } from "../../hooks/useWallet";
+import { useNavigate } from "react-router-dom";
+import { formatDuration, parseUnits, validateCreateParams, formatUnits, RecipientInput } from "@streamora/sdk";
+import { config } from "../../config";
+import { client } from "../../lib/client";
+import { addActivity, addStreamId } from "../../lib/store";
+import { useWallet } from "../../contexts/WalletContext";
+import { useTx } from "../../hooks/useTx";
+import TxStatus from "../../components/TxStatus";
+import WalletGate from "../../components/WalletGate";
 
-export default function CreateStream() {
-  const { isConnected } = useWallet();
-  const [formData, setFormData] = useState({
-    tokenAddress: "",
-    amount: "",
-    duration: "2592000",
-    recipients: [{ address: "", shares: 100 }],
-  });
+const DURATIONS = [3600, 86400, 604800, 2592000, 7776000, 31536000];
+const input = "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-600 focus:border-transparent";
 
-  const [error, setError] = useState("");
+function Form() {
+  const { address } = useWallet();
+  const nav = useNavigate();
+  const { state, run } = useTx();
+  const [token, setToken] = useState(config.defaultToken);
+  const [amount, setAmount] = useState("");
+  const [duration, setDuration] = useState(86400);
+  const [recipients, setRecipients] = useState<RecipientInput[]>([{ address: "", shares: 100 }]);
+  const [review, setReview] = useState(false);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-  };
+  const total = recipients.reduce((s, r) => s + (Number.isFinite(r.shares) ? r.shares : 0), 0);
+  const update = (i: number, patch: Partial<RecipientInput>) =>
+    setRecipients((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
-  const handleRecipientChange = (index: number, field: string, value: string) => {
-    const newRecipients = [...formData.recipients];
-    newRecipients[index] = {
-      ...newRecipients[index],
-      [field]: field === "shares" ? parseInt(value) : value,
-    };
-    setFormData((prev) => ({
-      ...prev,
-      recipients: newRecipients,
-    }));
-  };
+  let parsed: bigint | null = null;
+  let amountError: string | null = null;
+  try { parsed = amount ? parseUnits(amount, config.decimals) : null; } catch (e) { amountError = (e as Error).message; }
+  const start = Math.floor(Date.now() / 1000) + 60;
+  const params = parsed !== null ? { payer: address!, recipients, token, amount: parsed, startTime: start, endTime: start + duration } : null;
+  const problem = amountError ?? (params ? validateCreateParams(params) : "Enter an amount");
 
-  const addRecipient = () => {
-    setFormData((prev) => ({
-      ...prev,
-      recipients: [...prev.recipients, { address: "", shares: 0 }],
-    }));
-  };
-
-  const removeRecipient = (index: number) => {
-    if (formData.recipients.length > 1) {
-      setFormData((prev) => ({
-        ...prev,
-        recipients: prev.recipients.filter((_, i) => i !== index),
-      }));
+  const submit = async () => {
+    if (!params) return;
+    const res = await run(() => client.prepareCreateStream(params));
+    if (res?.status === "SUCCESS") {
+      const id = String(res.returnValue);
+      addStreamId(address!, id);
+      addActivity(address!, { hash: res.hash, kind: "create", streamId: id, amount: amount, at: Date.now(), status: "SUCCESS" });
+      nav(`/app/streams/${id}`);
     }
   };
 
-  const getTotalShares = () => {
-    return formData.recipients.reduce((sum, r) => sum + r.shares, 0);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("Transaction signing coming soon");
-  };
-
-  const totalShares = getTotalShares();
-  const isValid = isConnected && totalShares === 100 && formData.amount;
-
-  return (
-    <div className="section-container py-20">
-      <h1 className="text-5xl font-bold mb-12">Create a Payment Stream</h1>
-
-      <div className="max-w-2xl">
-        <form onSubmit={handleSubmit} className="card space-y-8">
-          <div>
-            <label className="block text-sm font-medium mb-2">Token Address</label>
-            <input
-              type="text"
-              name="tokenAddress"
-              placeholder="CAAAAAAA... (e.g., USDC on Stellar)"
-              value={formData.tokenAddress}
-              onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-              disabled={!isConnected}
-            />
-            <p className="text-xs text-gray-500 mt-1">Enter the token contract address</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Total Amount to Stream</label>
-            <input
-              type="number"
-              name="amount"
-              placeholder="1000"
-              value={formData.amount}
-              onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-              disabled={!isConnected}
-            />
-            <p className="text-xs text-gray-500 mt-1">This amount will be split among recipients</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Stream Duration</label>
-            <select
-              name="duration"
-              value={formData.duration}
-              onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-              disabled={!isConnected}
-            >
-              <option value="86400">1 day</option>
-              <option value="604800">1 week</option>
-              <option value="2592000">30 days</option>
-              <option value="7776000">90 days</option>
-              <option value="31536000">1 year</option>
-            </select>
-          </div>
-
-          <div>
-            <div className="flex justify-between items-center mb-4">
-              <label className="block text-sm font-medium">Recipients</label>
-              <button
-                type="button"
-                onClick={addRecipient}
-                className="text-sm text-teal-600 hover:text-teal-700 font-medium"
-                disabled={!isConnected || formData.recipients.length >= 10}
-              >
-                + Add Recipient
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {formData.recipients.map((recipient, index) => (
-                <div key={index} className="flex gap-3 bg-gray-50 p-4 rounded-lg">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      placeholder="Recipient address (GBBD47UZ...)"
-                      value={recipient.address}
-                      onChange={(e) => handleRecipientChange(index, "address", e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-                      disabled={!isConnected}
-                    />
-                  </div>
-                  <div className="w-24">
-                    <input
-                      type="number"
-                      placeholder="Share %"
-                      min="1"
-                      max="100"
-                      value={recipient.shares || ""}
-                      onChange={(e) => handleRecipientChange(index, "shares", e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-                      disabled={!isConnected}
-                    />
-                  </div>
-                  {formData.recipients.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeRecipient(index)}
-                      className="px-3 py-2 text-red-600 hover:bg-red-50 rounded"
-                      disabled={!isConnected}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-700">
-                Total shares: <span className={totalShares === 100 ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
-                  {totalShares}%
-                </span>
-              </p>
-              {totalShares !== 100 && (
-                <p className="text-xs text-red-600 mt-1">
-                  Recipients' shares must sum to exactly 100%
-                </p>
-              )}
-            </div>
-          </div>
-
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-red-700">{error}</p>
-            </div>
-          )}
-
-          {!isConnected && (
-            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-yellow-700">Connect your wallet first to create a stream</p>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={!isValid}
-            className="w-full btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {!isConnected ? "Connect Wallet First" : totalShares !== 100 ? "Fix Share Distribution" : "Create Stream"}
-          </button>
-        </form>
-
-        <div className="mt-8 card">
-          <h2 className="text-2xl font-bold mb-4">💡 How It Works</h2>
-          <ol className="space-y-3 text-gray-600">
-            <li><span className="font-bold">1. Set Recipients:</span> Add one or more recipients and split the stream amount among them</li>
-            <li><span className="font-bold">2. Share Distribution:</span> Each recipient gets their percentage of the total amount</li>
-            <li><span className="font-bold">3. Approve Transfer:</span> Sign the token transfer to lock funds in the contract</li>
-            <li><span className="font-bold">4. Stream Starts:</span> Funds accrue linearly and recipients can withdraw anytime</li>
-            <li><span className="font-bold">5. Flexible Withdrawals:</span> Recipients withdraw only what they need, when they need it</li>
-          </ol>
+  if (review && params && !problem) {
+    return (
+      <div className="card space-y-4">
+        <h2 className="text-2xl font-bold">Review and sign</h2>
+        <p>You will lock <b>{formatUnits(params.amount, config.decimals)}</b> of token <span className="font-mono text-xs break-all">{token}</span> in the contract for <b>{formatDuration(duration)}</b>, starting in about a minute.</p>
+        <ul className="text-sm space-y-1">
+          {recipients.map((r) => <li key={r.address}><span className="font-mono">{r.address.slice(0, 8)}…{r.address.slice(-6)}</span>: {r.shares}%</li>)}
+        </ul>
+        <p className="text-sm text-gray-600">You can cancel at any time; the unvested remainder is refunded to you.</p>
+        <TxStatus state={state} />
+        <div className="flex gap-3">
+          <button className="btn-secondary" onClick={() => setReview(false)} disabled={["simulating", "signing", "pending"].includes(state.phase)}>Back</button>
+          <button className="btn-primary" onClick={submit} disabled={["simulating", "signing", "pending"].includes(state.phase)}>Sign with Freighter</button>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <form className="card space-y-6" onSubmit={(e) => { e.preventDefault(); if (!problem) setReview(true); }}>
+      <div>
+        <label htmlFor="token" className="block text-sm font-medium mb-2">Token contract</label>
+        <input id="token" className={input} value={token} onChange={(e) => setToken(e.target.value.trim())} />
+        <p className="text-xs text-gray-500 mt-1">Defaults to native XLM on testnet. Assumes 7 decimals.</p>
+      </div>
+      <div>
+        <label htmlFor="amount" className="block text-sm font-medium mb-2">Total amount</label>
+        <input id="amount" className={input} inputMode="decimal" placeholder="10" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      </div>
+      <div>
+        <label htmlFor="duration" className="block text-sm font-medium mb-2">Duration</label>
+        <select id="duration" className={input} value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+          {DURATIONS.map((d) => <option key={d} value={d}>{formatDuration(d)}</option>)}
+        </select>
+      </div>
+      <fieldset>
+        <legend className="text-sm font-medium mb-2 flex justify-between w-full">
+          <span>Recipients</span>
+          <button type="button" className="text-teal-600" disabled={recipients.length >= 10} onClick={() => setRecipients([...recipients, { address: "", shares: 0 }])}>+ Add</button>
+        </legend>
+        {recipients.map((r, i) => (
+          <div key={i} className="flex gap-2 mb-2">
+            <input aria-label={`Recipient ${i + 1} address`} className={input} placeholder="G…" value={r.address} onChange={(e) => update(i, { address: e.target.value.trim() })} />
+            <input aria-label={`Recipient ${i + 1} share`} className="w-24 px-3 py-2 border border-gray-300 rounded-lg" type="number" min={1} max={100} value={r.shares || ""} onChange={(e) => update(i, { shares: Number(e.target.value) })} />
+            {recipients.length > 1 && <button type="button" aria-label="Remove recipient" className="px-3 text-red-600" onClick={() => setRecipients(recipients.filter((_, j) => j !== i))}>✕</button>}
+          </div>
+        ))}
+        <p className={`text-sm ${total === 100 ? "text-green-700" : "text-red-600"}`}>Total: {total}% (must be 100%)</p>
+      </fieldset>
+      {problem && amount && <p role="alert" className="text-sm text-red-600">{problem}</p>}
+      <button className="btn-primary w-full py-3 disabled:opacity-50" disabled={!!problem}>Review</button>
+    </form>
+  );
+}
+
+export default function CreateStream() {
+  return (
+    <div className="section-container">
+      <h1 className="text-4xl font-bold mb-8">Create a stream</h1>
+      <div className="max-w-2xl"><WalletGate><Form /></WalletGate></div>
     </div>
   );
 }
