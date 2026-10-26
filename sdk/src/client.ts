@@ -74,14 +74,30 @@ export class StreamoraClient {
    * Note: Returns unsigned transaction data; caller must sign and submit
    */
   async prepareCreateStream(params: StreamCreationParams): Promise<{
-    recipientAddress: string;
+    recipients: Array<{ address: string; shares: number }>;
     tokenAddress: string;
     amount: bigint;
     startTime: number;
     endTime: number;
   }> {
-    if (!isValidAddress(params.recipientAddress)) {
-      throw new Error("Invalid recipient address");
+    // Validate recipients
+    if (!params.recipients || params.recipients.length === 0) {
+      throw new Error("At least one recipient required");
+    }
+
+    let totalShares = 0;
+    for (const recipient of params.recipients) {
+      if (!isValidAddress(recipient.address)) {
+        throw new Error(`Invalid recipient address: ${recipient.address}`);
+      }
+      if (recipient.shares <= 0 || recipient.shares > 100) {
+        throw new Error("Each recipient share must be 1-100");
+      }
+      totalShares += recipient.shares;
+    }
+
+    if (totalShares !== 100) {
+      throw new Error(`Recipient shares must sum to 100 (got ${totalShares})`);
     }
 
     if (!isValidAddress(params.tokenAddress)) {
@@ -102,7 +118,7 @@ export class StreamoraClient {
     }
 
     return {
-      recipientAddress: params.recipientAddress,
+      recipients: params.recipients,
       tokenAddress: params.tokenAddress,
       amount: params.amount,
       startTime: params.startTime,
@@ -136,8 +152,23 @@ export class StreamoraClient {
    * Validate stream addresses and amounts
    */
   validateStreamParams(params: StreamCreationParams): { valid: boolean; error?: string } {
-    if (!isValidAddress(params.recipientAddress)) {
-      return { valid: false, error: "Invalid recipient address" };
+    if (!params.recipients || params.recipients.length === 0) {
+      return { valid: false, error: "At least one recipient required" };
+    }
+
+    let totalShares = 0;
+    for (const recipient of params.recipients) {
+      if (!isValidAddress(recipient.address)) {
+        return { valid: false, error: `Invalid recipient address: ${recipient.address}` };
+      }
+      if (recipient.shares <= 0 || recipient.shares > 100) {
+        return { valid: false, error: "Each recipient share must be 1-100" };
+      }
+      totalShares += recipient.shares;
+    }
+
+    if (totalShares !== 100) {
+      return { valid: false, error: `Recipient shares must sum to 100 (got ${totalShares})` };
     }
 
     if (!isValidAddress(params.tokenAddress)) {

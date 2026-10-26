@@ -3,7 +3,15 @@
  */
 
 export { StreamoraClient } from "./client";
-export type { Stream, StreamCreationParams, WithdrawalParams, StreamInfo, TransactionResult, ClientConfig } from "./types";
+export type {
+  Stream,
+  Recipient,
+  StreamCreationParams,
+  WithdrawalParams,
+  StreamInfo,
+  TransactionResult,
+  ClientConfig,
+} from "./types";
 export { Network } from "./types";
 export {
   calculateVestedAmount,

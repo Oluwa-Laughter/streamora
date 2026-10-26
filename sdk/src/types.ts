@@ -2,10 +2,15 @@
  * Core types for Streamora streaming payments
  */
 
+export interface Recipient {
+  address: string;
+  shares: number; // Percentage 1-100
+}
+
 export interface Stream {
   id: string;
   payer: string;
-  recipient: string;
+  recipients: Recipient[];
   token: string;
   amount: bigint;
   startTime: number;
@@ -15,7 +20,7 @@ export interface Stream {
 }
 
 export interface StreamCreationParams {
-  recipientAddress: string;
+  recipients: Recipient[];
   tokenAddress: string;
   amount: bigint;
   startTime: number;

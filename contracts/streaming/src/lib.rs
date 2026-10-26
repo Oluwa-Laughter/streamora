@@ -7,10 +7,16 @@ use soroban_sdk::{
 use core::cmp::{max, min};
 
 #[derive(Clone)]
+pub struct Recipient {
+    pub address: Address,
+    pub shares: i128, // Percentage (1-100)
+}
+
+#[derive(Clone)]
 pub struct Stream {
     pub id: String,
     pub payer: Address,
-    pub recipient: Address,
+    pub recipients: Vec<Recipient>,
     pub token: Address,
     pub amount: i128,
     pub start_time: u64,
@@ -24,12 +30,12 @@ pub struct StreamingContract;
 
 #[contractimpl]
 impl StreamingContract {
-    /// Create a new payment stream
+    /// Create a new payment stream with multiple recipients
     pub fn create_stream(
         env: Env,
         stream_id: String,
         payer: Address,
-        recipient: Address,
+        recipients: Vec<Recipient>,
         token: Address,
         amount: i128,
         start_time: u64,
@@ -48,6 +54,23 @@ impl StreamingContract {
             return Err(String::from_slice(&env, "End time must be in the future"));
         }
 
+        if recipients.len() == 0 {
+            return Err(String::from_slice(&env, "At least one recipient required"));
+        }
+
+        // Validate recipient shares sum to 100
+        let mut total_shares = 0i128;
+        for recipient in recipients.iter() {
+            if recipient.shares <= 0 || recipient.shares > 100 {
+                return Err(String::from_slice(&env, "Each recipient share must be 1-100"));
+            }
+            total_shares += recipient.shares;
+        }
+
+        if total_shares != 100 {
+            return Err(String::from_slice(&env, "Recipient shares must sum to 100"));
+        }
+
         // Check authorization
         payer.require_auth();
 
@@ -55,7 +78,7 @@ impl StreamingContract {
         let stream = Stream {
             id: stream_id.clone(),
             payer: payer.clone(),
-            recipient: recipient.clone(),
+            recipients: recipients.clone(),
             token: token.clone(),
             amount,
             start_time,
@@ -65,7 +88,6 @@ impl StreamingContract {
         };
 
         // Store stream
-        let key = Symbol::new(&env, "stream");
         env.storage().persistent().set(&stream_id, &stream);
 
         // Transfer tokens from payer to contract
@@ -130,16 +152,17 @@ impl StreamingContract {
         Ok(max(0, vested - stream.withdrawn))
     }
 
-    /// Withdraw available funds
+    /// Withdraw available funds (for one of the recipients)
     pub fn withdraw(
         env: Env,
         stream_id: String,
+        recipient_address: Address,
         amount: i128,
     ) -> Result<(), String> {
         let mut stream = Self::get_stream(env.clone(), stream_id.clone())?;
 
         // Check authorization
-        stream.recipient.require_auth();
+        recipient_address.require_auth();
 
         if stream.is_cancelled {
             return Err(String::from_slice(&env, "Stream is cancelled"));
@@ -149,11 +172,27 @@ impl StreamingContract {
             return Err(String::from_slice(&env, "Withdrawal amount must be positive"));
         }
 
+        // Find recipient and their share
+        let mut recipient_share: Option<i128> = None;
+        for recipient in stream.recipients.iter() {
+            if recipient.address == recipient_address {
+                recipient_share = Some(recipient.shares);
+                break;
+            }
+        }
+
+        if recipient_share.is_none() {
+            return Err(String::from_slice(&env, "Not a recipient of this stream"));
+        }
+
         let current_time = env.ledger().timestamp();
         let vested = Self::get_vested_amount(env.clone(), stream_id.clone(), current_time)?;
-        let withdrawable = max(0, vested - stream.withdrawn);
 
-        if amount > withdrawable {
+        // Calculate recipient's portion
+        let recipient_vested = vested * recipient_share.unwrap() / 100i128;
+        let recipient_withdrawable = max(0, recipient_vested - stream.withdrawn);
+
+        if amount > recipient_withdrawable {
             return Err(String::from_slice(&env, "Insufficient vested balance"));
         }
 
@@ -165,7 +204,7 @@ impl StreamingContract {
         let token_client = token::Client::new(&env, &stream.token);
         token_client.transfer(
             &env.current_contract_address(),
-            &stream.recipient,
+            &recipient_address,
             &amount,
         );
 
