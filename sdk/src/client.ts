@@ -1,7 +1,6 @@
 import {
   Account,
   Contract,
-  StrKey,
   TransactionBuilder,
   BASE_FEE,
   nativeToScVal,
@@ -27,7 +26,7 @@ import {
 } from "./utils.js";
 
 // Valid placeholder source for read-only simulations; nothing is signed or sent.
-const READ_SOURCE = StrKey.encodeEd25519PublicKey(Buffer.alloc(32));
+const READ_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 const addr = (a: string) => nativeToScVal(a, { type: "address" });
 const u64 = (n: bigint | number) => nativeToScVal(BigInt(n), { type: "u64" });
