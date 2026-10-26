@@ -1,0 +1,30 @@
+{
+  "name": "streamora",
+  "version": "0.1.0",
+  "description": "Open-source streaming-payments infrastructure on Stellar",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "sdk",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm -w apps/web run dev",
+    "build": "npm -w sdk run build && npm -w apps/web run build",
+    "test": "npm -w sdk run test && npm -w apps/web run test",
+    "lint": "npm -w sdk run lint && npm -w apps/web run lint"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "streaming",
+    "payments",
+    "web3"
+  ],
+  "license": "MIT",
+  "author": "Streamora Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Strea-mora/Streamora.git"
+  }
+}

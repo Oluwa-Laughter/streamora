@@ -1,0 +1,14 @@
+[workspace]
+members = ["streaming"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+authors = ["Streamora Contributors"]
+license = "MIT"
+repository = "https://github.com/Strea-mora/Streamora.git"
+
+[workspace.dependencies]
+soroban-sdk = "21.6"
+soroban-contract = "21.6"
