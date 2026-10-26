@@ -1,0 +1,7 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "outputDirectory": "apps/web/dist",
+  "framework": "vite",
+  "envPrefix": "VITE_"
+}
