@@ -24,11 +24,42 @@ Streaming payments are fundamental to modern finance—payroll, vendor contracts
 
 ### Prerequisites
 
-- **Rust 1.70+** with Soroban tools
-- **Node.js 18+**
-- **A Stellar testnet wallet** (Freighter or equivalent)
+- **Node.js 18+** and npm
+- **Recent stable Rust** for contract tests (optional for web development)
+- **Freighter on Stellar testnet** for wallet-backed features (optional for public pages)
 
 ### Local Development
+
+```bash
+git clone https://github.com/Strea-mora/Streamora.git
+cd Streamora
+npm ci
+# Vite runs from apps/web; place local configuration in that workspace.
+cp .env.example apps/web/.env.local
+npm run dev
+```
+
+Open the URL shown by Vite (typically http://localhost:5173). Edit `apps/web/.env.local` for your testnet settings. A root-level `.env.local` alone will **not** be loaded by the web app. The example contract/token IDs are testnet values, not production addresses.
+
+### Running Tests
+
+From the repository root:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+To run Rust contract tests separately:
+
+```bash
+(cd contracts/streaming && cargo test)
+```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for workspace-specific commands.
+
+## Project Structure
 
 ```text
 Streamora/
@@ -92,10 +123,10 @@ The tree summarizes tracked directories and key entry points from Git; some impl
 
 ### Creating a Stream
 
-````text
+```text
 Stream {
   payer: Address,
-  recipients: Vec<Recipient>, // { address, shares, withdrawn }
+  recipients: Vec<Recipient>, // each: { address, shares, withdrawn }
   token: Address,
   amount: i128,
   start_time: u64,
